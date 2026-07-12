@@ -157,7 +157,9 @@ pub(crate) struct ActionTreeNode {
 
 #[cfg(feature = "bincode")]
 impl Decode<()> for ActionTreeNode {
-    fn decode<D: bincode::de::Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+    fn decode<D: bincode::de::Decoder<Context = ()>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
         Ok(Self {
             player: Decode::decode(decoder)?,
             board_state: Decode::decode(decoder)?,
@@ -170,7 +172,10 @@ impl Decode<()> for ActionTreeNode {
 
 #[cfg(feature = "bincode")]
 impl Encode for ActionTreeNode {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
         self.player.encode(encoder)?;
         self.board_state.encode(encoder)?;
         self.amount.encode(encoder)?;

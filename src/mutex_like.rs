@@ -109,7 +109,9 @@ impl<T: Decode<()>> Decode<()> for MutexLike<T> {
 #[cfg(feature = "bincode")]
 impl<'de, T: BorrowDecode<'de, ()>> BorrowDecode<'de, ()> for MutexLike<T> {
     #[inline]
-    fn borrow_decode<D: BorrowDecoder<'de, Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
+    fn borrow_decode<D: BorrowDecoder<'de, Context = ()>>(
+        decoder: &mut D,
+    ) -> Result<Self, DecodeError> {
         Ok(Self::new(T::borrow_decode(decoder)?))
     }
 }
