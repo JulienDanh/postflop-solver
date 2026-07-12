@@ -147,13 +147,37 @@ pub struct ActionTree {
 }
 
 #[derive(Default)]
-#[cfg_attr(feature = "bincode", derive(Decode, Encode))]
 pub(crate) struct ActionTreeNode {
     pub(crate) player: u8,
     pub(crate) board_state: BoardState,
     pub(crate) amount: i32,
     pub(crate) actions: Vec<Action>,
     pub(crate) children: Vec<MutexLike<ActionTreeNode>>,
+}
+
+#[cfg(feature = "bincode")]
+impl Decode<()> for ActionTreeNode {
+    fn decode<D: bincode::de::Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self {
+            player: Decode::decode(decoder)?,
+            board_state: Decode::decode(decoder)?,
+            amount: Decode::decode(decoder)?,
+            actions: Decode::decode(decoder)?,
+            children: Decode::decode(decoder)?,
+        })
+    }
+}
+
+#[cfg(feature = "bincode")]
+impl Encode for ActionTreeNode {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        self.player.encode(encoder)?;
+        self.board_state.encode(encoder)?;
+        self.amount.encode(encoder)?;
+        self.actions.encode(encoder)?;
+        self.children.encode(encoder)?;
+        Ok(())
+    }
 }
 
 struct BuildTreeInfo {
@@ -390,10 +414,10 @@ impl ActionTree {
             let mut node = &*self.root.lock() as *const ActionTreeNode;
             for action in &self.history {
                 while (*node).is_chance() {
-                    node = &*(*node).children[0].lock();
+                    node = &*(&(*node).children)[0].lock();
                 }
                 let index = (*node).actions.iter().position(|x| x == action).unwrap();
-                node = &*(*node).children[index].lock();
+                node = &*(&(*node).children)[index].lock();
             }
             &*node
         }
@@ -405,7 +429,7 @@ impl ActionTree {
         unsafe {
             let mut node = self.current_node() as *const ActionTreeNode;
             while (*node).is_chance() {
-                node = &*(*node).children[0].lock();
+                node = &*(&(*node).children)[0].lock();
             }
             &*node
         }

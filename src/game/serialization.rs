@@ -126,7 +126,7 @@ impl Encode for PostFlopGame {
         self.tree_config.encode(encoder)?;
         self.added_lines.encode(encoder)?;
         self.removed_lines.encode(encoder)?;
-        self.action_root.encode(encoder)?;
+        self.action_root.lock().encode(encoder)?;
         self.target_storage_mode.encode(encoder)?;
         self.num_nodes.encode(encoder)?;
         self.is_compression_enabled.encode(encoder)?;
@@ -174,8 +174,8 @@ impl Encode for PostFlopGame {
     }
 }
 
-impl Decode for PostFlopGame {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl Decode<()> for PostFlopGame {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
         // version check
         let version = String::decode(decoder)?;
         if version != VERSION_STR {
@@ -191,7 +191,7 @@ impl Decode for PostFlopGame {
             tree_config: Decode::decode(decoder)?,
             added_lines: Decode::decode(decoder)?,
             removed_lines: Decode::decode(decoder)?,
-            action_root: Decode::decode(decoder)?,
+            action_root: Box::new(MutexLike::new(Decode::decode(decoder)?)),
             storage_mode: Decode::decode(decoder)?,
             num_nodes: Decode::decode(decoder)?,
             is_compression_enabled: Decode::decode(decoder)?,
@@ -292,8 +292,8 @@ impl Encode for PostFlopNode {
     }
 }
 
-impl Decode for PostFlopNode {
-    fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+impl Decode<()> for PostFlopNode {
+    fn decode<D: Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, DecodeError> {
         // node instance
         let mut node = Self {
             prev_action: Decode::decode(decoder)?,
