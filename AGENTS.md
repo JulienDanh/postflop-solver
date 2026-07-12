@@ -17,6 +17,9 @@ cargo build
 # Build with all features (adds zstd compression for save/load)
 cargo build --features zstd
 
+# Smoke test (~6s, 4 tests) — one solve + compressed + isomorphism + terminal
+./scripts/smoke.sh
+
 # Fast test subset (~17s, 26 tests) — skips slow bunching & all-hands tests
 cargo test --lib -- --skip bunching --skip test_all_hands --skip set_bunching
 
@@ -36,8 +39,10 @@ cargo clippy -- -A clippy::needless_range_loop
 cargo fmt --all --check
 ```
 
-Always run the **fast test subset** after changes. Run the full suite before
-committing or when touching `hand.rs` or `bunching.rs`.
+Always run **`./scripts/smoke.sh`** after touching solver, utility, sliceop, or
+game modules — it's the fastest signal that the solver still works (~6s). Run
+the **fast test subset** before committing. Run the full suite when touching
+`hand.rs` or `bunching.rs`.
 
 ## Architecture
 
