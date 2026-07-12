@@ -5,9 +5,6 @@ use crate::utility::*;
 use std::io::{self, Write};
 use std::mem::MaybeUninit;
 
-#[cfg(feature = "custom-alloc")]
-use crate::alloc::*;
-
 struct DiscountParams {
     alpha_t: f32,
     beta_t: f32,
@@ -158,17 +155,11 @@ fn solve_recursive<T: Game>(
     }
 
     // allocate memory for storing the counterfactual values
-    #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
-    #[cfg(not(feature = "custom-alloc"))]
     let cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
 
     // if the `node` is chance
     if node.is_chance() {
         // update the reach probabilities
-        #[cfg(feature = "custom-alloc")]
-        let mut cfreach_updated = Vec::with_capacity_in(cfreach.len(), StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach_updated = Vec::with_capacity(cfreach.len());
         mul_slice_scalar_uninit(
             cfreach_updated.spare_capacity_mut(),
@@ -190,9 +181,6 @@ fn solve_recursive<T: Game>(
         });
 
         // use 64-bit floating point values
-        #[cfg(feature = "custom-alloc")]
-        let mut result_f64 = Vec::with_capacity_in(num_hands, StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
         let mut result_f64 = Vec::with_capacity(num_hands);
 
         // sum up the counterfactual values
@@ -356,31 +344,6 @@ fn solve_recursive<T: Game>(
 }
 
 /// Computes the strategy by regret-matching algorithm.
-#[cfg(feature = "custom-alloc")]
-#[inline]
-fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32, StackAlloc> {
-    let mut strategy = Vec::with_capacity_in(regret.len(), StackAlloc);
-    let uninit = strategy.spare_capacity_mut();
-    uninit.iter_mut().zip(regret).for_each(|(s, r)| {
-        s.write(max(*r, 0.0));
-    });
-    unsafe { strategy.set_len(regret.len()) };
-
-    let row_size = regret.len() / num_actions;
-    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
-    sum_slices_uninit(denom.spare_capacity_mut(), &strategy);
-    unsafe { denom.set_len(row_size) };
-
-    let default = 1.0 / num_actions as f32;
-    strategy.chunks_exact_mut(row_size).for_each(|row| {
-        div_slice(row, &denom, default);
-    });
-
-    strategy
-}
-
-/// Computes the strategy by regret-matching algorithm.
-#[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
     let mut strategy = Vec::with_capacity(regret.len());
@@ -404,27 +367,6 @@ fn regret_matching(regret: &[f32], num_actions: usize) -> Vec<f32> {
 }
 
 /// Computes the strategy by regret-matching algorithm.
-#[cfg(feature = "custom-alloc")]
-#[inline]
-fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32, StackAlloc> {
-    let mut strategy = Vec::with_capacity_in(regret.len(), StackAlloc);
-    strategy.extend(regret.iter().map(|&r| r.max(0) as f32));
-
-    let row_size = strategy.len() / num_actions;
-    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
-    sum_slices_uninit(denom.spare_capacity_mut(), &strategy);
-    unsafe { denom.set_len(row_size) };
-
-    let default = 1.0 / num_actions as f32;
-    strategy.chunks_exact_mut(row_size).for_each(|row| {
-        div_slice(row, &denom, default);
-    });
-
-    strategy
-}
-
-/// Computes the strategy by regret-matching algorithm.
-#[cfg(not(feature = "custom-alloc"))]
 #[inline]
 fn regret_matching_compressed(regret: &[i16], num_actions: usize) -> Vec<f32> {
     let mut strategy = Vec::with_capacity(regret.len());

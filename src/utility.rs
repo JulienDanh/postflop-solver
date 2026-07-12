@@ -4,9 +4,6 @@ use crate::sliceop::*;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
 
-#[cfg(feature = "custom-alloc")]
-use crate::alloc::*;
-
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
@@ -76,52 +73,6 @@ fn weighted_sum(values: &[f32], weights: &[f32]) -> f32 {
 }
 
 /// Obtains the maximum absolute value of the given slice.
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-fn slice_absolute_max(slice: &[f32]) -> f32 {
-    if slice.len() < 32 {
-        slice.iter().fold(0.0, |a, x| max(a, x.abs()))
-    } else {
-        use std::arch::wasm32::*;
-
-        unsafe {
-            let slice_ptr = slice.as_ptr() as *const v128;
-            let mut tmp: [v128; 4] = [
-                f32x4_abs(v128_load(slice_ptr)),
-                f32x4_abs(v128_load(slice_ptr.add(1))),
-                f32x4_abs(v128_load(slice_ptr.add(2))),
-                f32x4_abs(v128_load(slice_ptr.add(3))),
-            ];
-
-            let mut iter = slice[16..].chunks_exact(16);
-            for chunk in iter.by_ref() {
-                let chunk_ptr = chunk.as_ptr() as *const v128;
-                tmp[0] = f32x4_max(tmp[0], f32x4_abs(v128_load(chunk_ptr)));
-                tmp[1] = f32x4_max(tmp[1], f32x4_abs(v128_load(chunk_ptr.add(1))));
-                tmp[2] = f32x4_max(tmp[2], f32x4_abs(v128_load(chunk_ptr.add(2))));
-                tmp[3] = f32x4_max(tmp[3], f32x4_abs(v128_load(chunk_ptr.add(3))));
-            }
-
-            tmp[0] = f32x4_max(tmp[0], tmp[1]);
-            tmp[2] = f32x4_max(tmp[2], tmp[3]);
-            tmp[0] = f32x4_max(tmp[0], tmp[2]);
-            let tmpmax = max(
-                max(
-                    f32x4_extract_lane::<0>(tmp[0]),
-                    f32x4_extract_lane::<1>(tmp[0]),
-                ),
-                max(
-                    f32x4_extract_lane::<2>(tmp[0]),
-                    f32x4_extract_lane::<3>(tmp[0]),
-                ),
-            );
-
-            iter.remainder().iter().fold(tmpmax, |a, x| max(a, x.abs()))
-        }
-    }
-}
-
-/// Obtains the maximum absolute value of the given slice.
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 fn slice_absolute_max(slice: &[f32]) -> f32 {
     if slice.len() < 16 {
         slice.iter().fold(0.0, |a, x| max(a, x.abs()))
@@ -140,52 +91,6 @@ fn slice_absolute_max(slice: &[f32]) -> f32 {
 }
 
 /// Obtains the maximum value of the given non-negative slice.
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-fn slice_nonnegative_max(slice: &[f32]) -> f32 {
-    if slice.len() < 32 {
-        slice.iter().fold(0.0, |a, &x| max(a, x))
-    } else {
-        use std::arch::wasm32::*;
-
-        unsafe {
-            let slice_ptr = slice.as_ptr() as *const v128;
-            let mut tmp: [v128; 4] = [
-                v128_load(slice_ptr),
-                v128_load(slice_ptr.add(1)),
-                v128_load(slice_ptr.add(2)),
-                v128_load(slice_ptr.add(3)),
-            ];
-
-            let mut iter = slice[16..].chunks_exact(16);
-            for chunk in iter.by_ref() {
-                let chunk_ptr = chunk.as_ptr() as *const v128;
-                tmp[0] = f32x4_max(tmp[0], v128_load(chunk_ptr));
-                tmp[1] = f32x4_max(tmp[1], v128_load(chunk_ptr.add(1)));
-                tmp[2] = f32x4_max(tmp[2], v128_load(chunk_ptr.add(2)));
-                tmp[3] = f32x4_max(tmp[3], v128_load(chunk_ptr.add(3)));
-            }
-
-            tmp[0] = f32x4_max(tmp[0], tmp[1]);
-            tmp[2] = f32x4_max(tmp[2], tmp[3]);
-            tmp[0] = f32x4_max(tmp[0], tmp[2]);
-            let tmpmax = max(
-                max(
-                    f32x4_extract_lane::<0>(tmp[0]),
-                    f32x4_extract_lane::<1>(tmp[0]),
-                ),
-                max(
-                    f32x4_extract_lane::<2>(tmp[0]),
-                    f32x4_extract_lane::<3>(tmp[0]),
-                ),
-            );
-
-            iter.remainder().iter().fold(tmpmax, |a, &x| max(a, x))
-        }
-    }
-}
-
-/// Obtains the maximum value of the given non-negative slice.
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 fn slice_nonnegative_max(slice: &[f32]) -> f32 {
     if slice.len() < 16 {
         slice.iter().fold(0.0, |a, &x| max(a, x))
@@ -266,12 +171,6 @@ pub fn finalize<T: Game>(game: &mut T) {
 
     // set the game solved
     game.set_solved();
-
-    // free buffer
-    #[cfg(all(feature = "custom-alloc", feature = "rayon"))]
-    rayon::broadcast(|_| free_custom_alloc_buffer());
-    #[cfg(all(feature = "custom-alloc", not(feature = "rayon")))]
-    free_custom_alloc_buffer();
 }
 
 /// Computes the exploitability of the current strategy.
@@ -374,17 +273,11 @@ fn compute_cfvalue_recursive<T: Game>(
     let num_hands = result.len();
 
     // allocate memory for storing the counterfactual values
-    #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
-    #[cfg(not(feature = "custom-alloc"))]
     let cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
 
     // chance node
     if node.is_chance() {
         // update the reach probabilities
-        #[cfg(feature = "custom-alloc")]
-        let mut cfreach_updated = Vec::with_capacity_in(cfreach.len(), StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach_updated = Vec::with_capacity(cfreach.len());
         mul_slice_scalar_uninit(
             cfreach_updated.spare_capacity_mut(),
@@ -406,9 +299,6 @@ fn compute_cfvalue_recursive<T: Game>(
         });
 
         // use 64-bit floating point values
-        #[cfg(feature = "custom-alloc")]
-        let mut result_f64 = Vec::with_capacity_in(num_hands, StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
         let mut result_f64 = Vec::with_capacity(num_hands);
 
         // sum up the counterfactual values
@@ -464,13 +354,6 @@ fn compute_cfvalue_recursive<T: Game>(
         });
 
         // obtain the strategy
-        #[cfg(feature = "custom-alloc")]
-        let mut strategy = if game.is_compression_enabled() {
-            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
-        } else {
-            normalized_strategy_custom_alloc(node.strategy(), num_actions)
-        };
-        #[cfg(not(feature = "custom-alloc"))]
         let mut strategy = if game.is_compression_enabled() {
             normalized_strategy_compressed(node.strategy_compressed(), num_actions)
         } else {
@@ -509,13 +392,6 @@ fn compute_cfvalue_recursive<T: Game>(
         );
     } else {
         // obtain the strategy
-        #[cfg(feature = "custom-alloc")]
-        let mut cfreach_actions = if game.is_compression_enabled() {
-            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
-        } else {
-            normalized_strategy_custom_alloc(node.strategy(), num_actions)
-        };
-        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach_actions = if game.is_compression_enabled() {
             normalized_strategy_compressed(node.strategy_compressed(), num_actions)
         } else {
@@ -587,17 +463,11 @@ fn compute_best_cfv_recursive<T: Game>(
     }
 
     // allocate memory for storing the counterfactual values
-    #[cfg(feature = "custom-alloc")]
-    let cfv_actions = MutexLike::new(Vec::with_capacity_in(num_actions * num_hands, StackAlloc));
-    #[cfg(not(feature = "custom-alloc"))]
     let cfv_actions = MutexLike::new(Vec::with_capacity(num_actions * num_hands));
 
     // chance node
     if node.is_chance() {
         // update the reach probabilities
-        #[cfg(feature = "custom-alloc")]
-        let mut cfreach_updated = Vec::with_capacity_in(cfreach.len(), StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach_updated = Vec::with_capacity(cfreach.len());
         mul_slice_scalar_uninit(
             cfreach_updated.spare_capacity_mut(),
@@ -618,9 +488,6 @@ fn compute_best_cfv_recursive<T: Game>(
         });
 
         // use 64-bit floating point values
-        #[cfg(feature = "custom-alloc")]
-        let mut result_f64 = Vec::with_capacity_in(num_hands, StackAlloc);
-        #[cfg(not(feature = "custom-alloc"))]
         let mut result_f64 = Vec::with_capacity(num_hands);
 
         // sum up the counterfactual values
@@ -678,13 +545,6 @@ fn compute_best_cfv_recursive<T: Game>(
     // opponent node
     else {
         // obtain the strategy
-        #[cfg(feature = "custom-alloc")]
-        let mut cfreach_actions = if game.is_compression_enabled() {
-            normalized_strategy_compressed_custom_alloc(node.strategy_compressed(), num_actions)
-        } else {
-            normalized_strategy_custom_alloc(node.strategy(), num_actions)
-        };
-        #[cfg(not(feature = "custom-alloc"))]
         let mut cfreach_actions = if game.is_compression_enabled() {
             normalized_strategy_compressed(node.strategy_compressed(), num_actions)
         } else {
@@ -719,32 +579,6 @@ fn compute_best_cfv_recursive<T: Game>(
     }
 }
 
-#[cfg(feature = "custom-alloc")]
-#[inline]
-pub(crate) fn normalized_strategy_custom_alloc(
-    strategy: &[f32],
-    num_actions: usize,
-) -> Vec<f32, StackAlloc> {
-    let mut normalized = Vec::with_capacity_in(strategy.len(), StackAlloc);
-    let uninit = normalized.spare_capacity_mut();
-
-    let row_size = strategy.len() / num_actions;
-    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
-    sum_slices_uninit(denom.spare_capacity_mut(), strategy);
-    unsafe { denom.set_len(row_size) };
-
-    let default = 1.0 / num_actions as f32;
-    uninit
-        .chunks_exact_mut(row_size)
-        .zip(strategy.chunks_exact(row_size))
-        .for_each(|(n, s)| {
-            div_slice_uninit(n, s, &denom, default);
-        });
-
-    unsafe { normalized.set_len(strategy.len()) };
-    normalized
-}
-
 #[inline]
 pub(crate) fn normalized_strategy(strategy: &[f32], num_actions: usize) -> Vec<f32> {
     let mut normalized = Vec::with_capacity(strategy.len());
@@ -764,33 +598,6 @@ pub(crate) fn normalized_strategy(strategy: &[f32], num_actions: usize) -> Vec<f
         });
 
     unsafe { normalized.set_len(strategy.len()) };
-    normalized
-}
-
-#[cfg(feature = "custom-alloc")]
-#[inline]
-pub(crate) fn normalized_strategy_compressed_custom_alloc(
-    strategy: &[u16],
-    num_actions: usize,
-) -> Vec<f32, StackAlloc> {
-    let mut normalized = Vec::with_capacity_in(strategy.len(), StackAlloc);
-    let uninit = normalized.spare_capacity_mut();
-
-    uninit.iter_mut().zip(strategy).for_each(|(n, s)| {
-        n.write(*s as f32);
-    });
-    unsafe { normalized.set_len(strategy.len()) };
-
-    let row_size = strategy.len() / num_actions;
-    let mut denom = Vec::with_capacity_in(row_size, StackAlloc);
-    sum_slices_uninit(denom.spare_capacity_mut(), &normalized);
-    unsafe { denom.set_len(row_size) };
-
-    let default = 1.0 / num_actions as f32;
-    normalized.chunks_exact_mut(row_size).for_each(|row| {
-        div_slice(row, &denom, default);
-    });
-
     normalized
 }
 
