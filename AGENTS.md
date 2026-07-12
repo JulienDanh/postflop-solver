@@ -168,7 +168,76 @@ All `#[cfg(feature = ...)]` branches must be maintained in sync.
 - `tests/kuhn.rs` and `tests/leduc.rs` implement minimal poker games against the
   `Game` trait — good for verifying solver correctness changes.
 
-## Style
+## Node locking
+
+Node locking forces a player's strategy at a specific node to a fixed
+distribution, then solves the rest of the tree as a best response. This is
+how you model exploitative play (e.g., "IP folds 90% to cbet" → solve for
+OOP's maximally exploitative strategy).
+
+### Lifecycle
+
+```
+allocate_memory()
+  → play(action) to navigate to the target node
+  → lock_current_strategy(&[f32])
+  → back_to_root()
+  → solve() / solve_step()
+```
+
+To remove a lock, repeat the same navigation after `allocate_memory()` and call
+`unlock_current_strategy()`. Locks persist across `allocate_memory()` calls —
+calling `allocate_memory(false)` to reset for a new solve does **not** clear
+them.
+
+###Strategy array layout
+
+`lock_current_strategy(strategy)` takes a slice of length
+`num_actions * num_hands`, laid out **action-major, hand-minor**:
+
+```
+[a0h0, a0h1, ..., a0hN, a1h0, a1h1, ..., a1hN, ..., aMh0, ..., aMhN]
+```
+
+- `num_actions` = `game.available_actions().len()`
+- `num_hands` = `game.private_cards(player).len()` where `player` is the
+  current player at the locked node
+- `a0` is the first action (e.g., Check or Fold), `a1` is the second, etc.
+
+###Locking rules
+
+- A hand is **locked** if any action's value for that hand is > 0.0.
+- A hand is **unlocked** (solver can adjust freely) if all actions' values
+  for that hand are ≤ 0.0.
+- For locked hands, the frequencies are normalized so actions sum to 1.0.
+- Negative values are treated as zero.
+
+This means you can lock some hands while leaving others free, e.g., lock only
+the bluffing range and let the solver optimize value hands.
+
+###Reading OOP's strategy at the root
+
+After solving, call `game.strategy()` **at the root node** (before any `play()`)
+to read the cbet decision. The strategy array uses the same action-major layout:
+`[check_freq * N, bet_freq * N, ...]`.
+
+###Gotchas
+
+- `play()` invalidates the normalized weights cache. Call
+  `cache_normalized_weights()` before reading `strategy()`, `equity()`,
+  `expected_values()`, or `normalized_weights()` after navigating.
+- `normalized_weights()` returns **raw combo counts**, not 0-1 probabilities.
+  Divide by the sum to get range percentages.
+- `solve()` takes `&mut T` but `tree_config()` takes `&self` — extract the
+  target exploitability into a variable before calling `solve()`.
+
+###See also
+
+- `examples/exploit_fold_to_cbet.rs` — full worked example
+- `examples/node_locking.rs` — simpler toy example with known solutions
+- `src/game/interpreter.rs:870` — `lock_current_strategy` implementation
+- `src/utility.rs:628` — `apply_locking_strategy` (how locks override the
+  solver's computed strategy during CFR)
 
 - No comments unless explaining non-obvious `unsafe` or algorithmic intent.
 - `#[inline]` on small hot functions.
