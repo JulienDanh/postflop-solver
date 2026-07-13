@@ -251,7 +251,7 @@ fn compute_average_py(values: Vec<f32>, weights: Vec<f32>) -> f32 {
 }
 
 #[pymodule]
-fn postflop_solver(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPostFlopGame>()?;
     m.add_function(wrap_pyfunction!(compute_average_py, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

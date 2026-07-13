@@ -11,3 +11,5 @@ requires-python = ">=3.8"
 
 [tool.maturin]
 features = ["python"]
+python-source = "python"
+module-name = "postflop_solver._core"
