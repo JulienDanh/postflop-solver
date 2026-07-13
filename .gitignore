@@ -1,13 +1,2 @@
 /target
 Cargo.lock
-
-# Python build artifacts
-__pycache__/
-*.pyc
-*.so
-*.egg-info/
-*.whl
-python/postflop_solver/_core.abi3.so
-
-# Generated docs
-docs/python/

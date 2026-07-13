@@ -63,9 +63,6 @@ mod sliceop;
 mod solver;
 mod utility;
 
-#[cfg(feature = "python")]
-mod python;
-
 #[cfg(feature = "bincode")]
 pub use file::*;
 
